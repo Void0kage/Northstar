@@ -1,25 +1,19 @@
 const express = require('express');
-const { DatabaseSync } = require('node:sqlite');
+const { Pool } = require('pg');
 const swaggerUi = require('swagger-ui-express');
 const openapi = require('./openapi.json');
+const cors = require('cors');
 
 const app = express();
+app.use(cors()); // Allows your phone, PC, or AI to connect from anywhere
 app.use(express.json());
-
-// ---------- DOCUMENTATION ----------
 app.use('/docs', swaggerUi.serve, swaggerUi.setup(openapi));
 
-// ---------- DATABASE ----------
-// Uses DB_PATH environment variable (for tests), otherwise defaults to data.db
-const db = new DatabaseSync(process.env.DB_PATH || 'data.db');
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS tasks (
-    id    INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT    NOT NULL,
-    done  INTEGER NOT NULL DEFAULT 0
-  )
-`);
+// Connect to Neon (Postgres)
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false } // Required for cloud databases
+});
 
 function rowToTask(row) {
   return {
@@ -29,48 +23,34 @@ function rowToTask(row) {
   };
 }
 
-// ---------- AUTHENTICATION ----------
-const API_SECRET = 'super-secret-token-123';
-
-function requireAuth(req, res, next) {
-  const authHeader = req.headers.authorization;
-
-  // We expect the header to look exactly like: "Bearer super-secret-token-123"
-  if (authHeader === `Bearer ${API_SECRET}`) {
-    next(); // Token is good! Let them through to the route.
-  } else {
-    res.status(401).json({ error: 'Unauthorized: missing or invalid token' });
-  }
-}
-
 // ---------- ROUTES ----------
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.get('/tasks', (req, res) => {
-  const rows = db.prepare('SELECT * FROM tasks ORDER BY id').all();
-  res.json(rows.map(rowToTask));
+app.get('/tasks', async (req, res) => {
+  const result = await pool.query('SELECT * FROM tasks ORDER BY id');
+  res.json(result.rows.map(rowToTask));
 });
 
-app.post('/tasks', requireAuth, (req, res) => {
+app.post('/tasks', async (req, res) => {
   const title = req.body.title;
   if (!title || typeof title !== 'string') {
     return res.status(400).json({ error: 'title is required' });
   }
 
-  const result = db.prepare('INSERT INTO tasks (title) VALUES (?)').run(title);
-  const row = db
-    .prepare('SELECT * FROM tasks WHERE id = ?')
-    .get(result.lastInsertRowid);
-
-  res.status(201).json(rowToTask(row));
+  const result = await pool.query(
+    'INSERT INTO tasks (title) VALUES ($1) RETURNING *',
+    [title]
+  );
+  res.status(201).json(rowToTask(result.rows[0]));
 });
 
-app.patch('/tasks/:id', requireAuth, (req, res) => {
+app.patch('/tasks/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-  if (!existing) {
+  
+  const existing = await pool.query('SELECT * FROM tasks WHERE id = $1', [id]);
+  if (existing.rows.length === 0) {
     return res.status(404).json({ error: 'Task ' + id + ' not found' });
   }
 
@@ -79,47 +59,50 @@ app.patch('/tasks/:id', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'done must be true or false' });
   }
 
-  db.prepare('UPDATE tasks SET done = ? WHERE id = ?').run(done ? 1 : 0, id);
-  const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
-  res.json(rowToTask(updated));
+  const updated = await pool.query(
+    'UPDATE tasks SET done = $1 WHERE id = $2 RETURNING *',
+    [done, id]
+  );
+  res.json(rowToTask(updated.rows[0]));
 });
 
-app.delete('/tasks/:id', requireAuth, (req, res) => {
+app.delete('/tasks/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const result = db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
-  if (result.changes === 0) {
+  const result = await pool.query('DELETE FROM tasks WHERE id = $1', [id]);
+  
+  if (result.rowCount === 0) {
     return res.status(404).json({ error: 'Task ' + id + ' not found' });
   }
   res.status(204).end();
 });
 
-// ---------- ERROR HANDLING ----------
+// Create table on startup
+pool.query(`
+  CREATE TABLE IF NOT EXISTS tasks (
+    id    SERIAL PRIMARY KEY,
+    title TEXT    NOT NULL,
+    done  BOOLEAN NOT NULL DEFAULT false
+  )
+`).catch(console.error);
 
-// 404: any request that matched no route above
+// ---------- ERROR HANDLING ----------
 app.use((req, res) => {
   res.status(404).json({ error: `No route for ${req.method} ${req.path}` });
 });
 
-// central error handler — the 4 arguments are how Express recognizes it
 app.use((err, req, res, next) => {
   if (err.type === 'entity.parse.failed') {
     return res.status(400).json({ error: 'Malformed JSON body' });
   }
-
   const status = err.status ?? 500;
-  if (status >= 500) console.error(err); // log real bugs, hide them from clients
+  if (status >= 500) console.error(err);
   res.status(status).json({ error: err.message ?? 'Internal server error' });
 });
 
 // ---------- START ----------
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`API running on port ${PORT}`);
+});
 
-// Only start the server if this file is run directly (not imported by tests)
-if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`API running at http://localhost:${PORT}`);
-  });
-}
-
-// Export the app for automated tests
 module.exports = app;

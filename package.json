@@ -13,8 +13,10 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "cors": "^2.8.5",
     "express": "^5.3.0",
-    "swagger-ui-express": "^5.0.1"
+    "pg": "^8.11.0",
+    "swagger-ui-express": "^5.0.0"
   },
   "devDependencies": {
     "supertest": "^7.3.1"

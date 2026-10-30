@@ -3,7 +3,7 @@
   "info": {
     "title": "Northstar Tasks API",
     "version": "1.0.0",
-    "description": "A small to-do list API with persistent storage."
+    "description": "A personal to-do list API with persistent storage."
   },
   "servers": [
     {
@@ -38,7 +38,6 @@
       },
       "post": {
         "summary": "Create a task",
-        "security": [{ "BearerAuth": [] }],
         "requestBody": {
           "required": true,
           "content": {
@@ -47,7 +46,7 @@
                 "type": "object",
                 "required": ["title"],
                 "properties": {
-                  "title": { "type": "string", "example": "Lets go dancing" }
+                  "title": { "type": "string", "example": "Buy milk" }
                 }
               }
             }
@@ -69,7 +68,6 @@
     "/tasks/{id}": {
       "patch": {
         "summary": "Mark a task done or not done",
-        "security": [{ "BearerAuth": [] }],
         "parameters": [
           {
             "name": "id",
@@ -107,7 +105,6 @@
       },
       "delete": {
         "summary": "Delete a task",
-        "security": [{ "BearerAuth": [] }],
         "parameters": [
           {
             "name": "id",
@@ -124,18 +121,12 @@
     }
   },
   "components": {
-    "securitySchemes": {
-      "BearerAuth": {
-        "type": "http",
-        "scheme": "bearer"
-      }
-    },
     "schemas": {
       "Task": {
         "type": "object",
         "properties": {
           "id": { "type": "integer", "example": 1 },
-          "title": { "type": "string", "example": "Lets go dancing" },
+          "title": { "type": "string", "example": "Buy milk" },
           "done": { "type": "boolean", "example": false }
         }
       }
